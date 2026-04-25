@@ -108,9 +108,23 @@ def main():
         device=MIC_DEVICE
     ):
         last_wake_time = 0
-        COOLDOWN = 3.0  # seconds before wake word can trigger again
+        COOLDOWN = 3.0
+        MAX_QUEUE_SIZE = 10  # max chunks to keep, drain the rest
 
         while True:
+            # Drain excess queue during inactivity to prevent stale audio buildup
+            qsize = audio_q.qsize()
+            if qsize > MAX_QUEUE_SIZE:
+                drained = 0
+                while audio_q.qsize() > MAX_QUEUE_SIZE:
+                    try:
+                        audio_q.get_nowait()
+                        drained += 1
+                    except queue.Empty:
+                        break
+                # Uncomment below to see drain activity:
+                # print(f"[INFO] Drained {drained} stale chunks (queue was {qsize})")
+
             try:
                 data = audio_q.get(timeout=1.0)
             except queue.Empty:
@@ -130,20 +144,14 @@ def main():
                 command = listen_for_command(recognizer)
                 handle_command(command)
 
-                # Hard drain — clear anything buffered during command listen
-                drained = 0
+                # Hard drain after command
                 while not audio_q.empty():
                     try:
                         audio_q.get_nowait()
-                        drained += 1
                     except queue.Empty:
                         break
-                if drained:
-                    print(f"[INFO] Drained {drained} buffered chunks.")
 
-                # Reset wake word internal state to clear lingering scores
                 wake_model.reset()
-
                 print("\n[INFO] Listening for wake word again...\n")
 
 if __name__ == "__main__":
