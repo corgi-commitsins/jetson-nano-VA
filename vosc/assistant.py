@@ -1,4 +1,5 @@
 import sys, queue, json, time, subprocess, os
+import numpy as np
 import sounddevice as sd
 from openwakeword.model import Model as WakeModel
 import vosk
@@ -112,8 +113,8 @@ def main():
             except queue.Empty:
                 continue
 
-            # Wake word detection
-            scores = wake_model.predict(data)
+            audio_np = np.frombuffer(data, dtype=np.int16)
+            scores = wake_model.predict(audio_np)
             triggered = {k: v for k, v in scores.items() if v > WAKE_THRESHOLD}
 
             if triggered:
