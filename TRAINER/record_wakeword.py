@@ -22,7 +22,7 @@ SAMPLE_RATE    = 16000
 CHANNELS       = 1
 NUM_RECORDINGS = 15
 OUTPUT_BASE    = os.path.join(os.path.expanduser("~"), "wakeword_training")
-MIC_DEVICE     = 44  # set to int if wrong mic is selected, e.g. MIC_DEVICE = 1
+MIC_DEVICE     = 45  # set to int if wrong mic is selected, e.g. MIC_DEVICE = 1
 
 # ─── Recording state ──────────────────────────────────────────────────────────
 recording_chunks = []
