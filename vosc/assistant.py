@@ -107,21 +107,43 @@ def main():
         callback=audio_callback,
         device=MIC_DEVICE
     ):
+        last_wake_time = 0
+        COOLDOWN = 3.0  # seconds before wake word can trigger again
+
         while True:
             try:
                 data = audio_q.get(timeout=1.0)
             except queue.Empty:
                 continue
 
+            # Wake word detection
             audio_np = np.frombuffer(data, dtype=np.int16)
             scores = wake_model.predict(audio_np)
             triggered = {k: v for k, v in scores.items() if v > WAKE_THRESHOLD}
 
-            if triggered:
+            now = time.time()
+            if triggered and (now - last_wake_time) > COOLDOWN:
                 best = max(triggered, key=triggered.get)
                 print(f"[WAKE] '{best}' detected (score={triggered[best]:.2f})")
+                last_wake_time = now
+
                 command = listen_for_command(recognizer)
                 handle_command(command)
+
+                # Hard drain — clear anything buffered during command listen
+                drained = 0
+                while not audio_q.empty():
+                    try:
+                        audio_q.get_nowait()
+                        drained += 1
+                    except queue.Empty:
+                        break
+                if drained:
+                    print(f"[INFO] Drained {drained} buffered chunks.")
+
+                # Reset wake word internal state to clear lingering scores
+                wake_model.reset()
+
                 print("\n[INFO] Listening for wake word again...\n")
 
 if __name__ == "__main__":
