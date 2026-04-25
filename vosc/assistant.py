@@ -221,7 +221,7 @@ def main():
 
             audio_np = np.frombuffer(data, dtype=np.int16)
             scores = wake_model.predict(audio_np)
-            triggered = {k: v for k, v in scores.items() if v > WAKE_THRESHOLD}
+            triggered = {k: v for k, v in scores.items() if v > WAKE_THRESHOLD and "hey_jarvis" in k.lower()}
 
             now = time.time()
             if triggered and (now - last_wake_time) > COOLDOWN:
