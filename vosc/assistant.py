@@ -6,19 +6,21 @@ from openwakeword.model import Model as WakeModel
 import vosk
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-VOSK_MODEL_PATH = "/home/kiran/models/vosk-model-small-en-us-0.15"
-RATE             = 16000
-CHANNELS         = 1
-BLOCKSIZE        = 1280
-WAKE_THRESHOLD   = 0.5
-COMMAND_TIMEOUT  = 8.0
-MIC_DEVICE       = 11
+VOSK_MODEL_PATH_IN = "/home/kiran/models/vosk-model-small-en-in-0.4"
+VOSK_MODEL_PATH_US = "/home/kiran/models/vosk-model-small-en-us-0.15"
+RATE               = 16000
+CHANNELS           = 1
+BLOCKSIZE          = 1280
+WAKE_THRESHOLD     = 0.5
+COMMAND_TIMEOUT    = 8.0
+MIC_DEVICE         = 11
 
-PIPER_BIN        = "/home/kiran/VA/jetson-nano-VA/piper-src/piper"
-PIPER_MODEL      = "/home/kiran/VA/jetson-nano-VA/piper/en_US-lessac-medium.onnx"
-PIPER_LIBS       = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/lib"
-PIPER_ESPEAK     = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/share/espeak-ng-data"
-PIPER_RATE       = 22050
+PIPER_BIN          = "/home/kiran/VA/jetson-nano-VA/piper-src/piper"
+PIPER_MODEL        = "/home/kiran/VA/jetson-nano-VA/piper/en_US-lessac-medium.onnx"
+PIPER_LIBS         = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/lib"
+PIPER_ESPEAK       = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/share/espeak-ng-data"
+PIPER_RATE         = 22050
+
 
 # ─── TTS ──────────────────────────────────────────────────────────────────────
 def speak(text):
@@ -40,6 +42,15 @@ def speak(text):
         sd.wait()
     except Exception as e:
         print(f"[TTS ERROR] {e}")
+
+
+# ─── Beep ─────────────────────────────────────────────────────────────────────
+def play_beep(freq=880, duration=0.15, volume=0.3):
+    t = np.linspace(0, duration, int(PIPER_RATE * duration), False)
+    tone = (np.sin(2 * np.pi * freq * t) * volume * 32767).astype(np.int16)
+    sd.play(tone.astype(np.float32) / 32767, samplerate=PIPER_RATE)
+    sd.wait()
+
 
 # ─── Intent router ────────────────────────────────────────────────────────────
 def handle_command(text):
@@ -70,6 +81,7 @@ def handle_command(text):
     else:
         speak(f"You said: {text}. I don't know how to handle that yet.")
 
+
 # ─── Audio queue ──────────────────────────────────────────────────────────────
 audio_q = queue.Queue()
 
@@ -78,51 +90,62 @@ def audio_callback(indata, frames, time_info, status):
         print(f"[AUDIO] {status}", file=sys.stderr)
     audio_q.put(bytes(indata))
 
-# beep after wake word to signal listening
-def play_beep(freq=880, duration=0.15, volume=0.3):
-    """Play a short beep to signal Jarvis is listening."""
-    t = np.linspace(0, duration, int(PIPER_RATE * duration), False)
-    tone = (np.sin(2 * np.pi * freq * t) * volume * 32767).astype(np.int16)
-    sd.play(tone.astype(np.float32) / 32767, samplerate=PIPER_RATE)
-    sd.wait()
 
-# ─── Listen for a command after wake word ─────────────────────────────────────
-def listen_for_command(recognizer):
+# ─── Listen for command with 2 Vosk models ───────────────────────────────────
+def listen_for_command(rec_in, rec_us):
     print("[INFO] Listening for command...")
-    recognizer.Reset()
+    rec_in.Reset()
+    rec_us.Reset()
 
-    # Drain only the wake word audio (fixed small amount)
     for _ in range(3):
         try:
             audio_q.get_nowait()
         except queue.Empty:
             break
 
-    play_beep()  # signals user: "speak now"
+    play_beep()
 
     deadline = time.time() + COMMAND_TIMEOUT
-    text = ""
+    text_in = ""
+    text_us = ""
 
     while time.time() < deadline:
         try:
             data = audio_q.get(timeout=0.5)
         except queue.Empty:
             continue
-        if recognizer.AcceptWaveform(data):
-            result = json.loads(recognizer.Result())
-            chunk = result.get("text", "")
-            if chunk:
-                text += " " + chunk
 
-    final = json.loads(recognizer.FinalResult())
-    text += " " + final.get("text", "")
-    return text.strip()
+        if rec_in.AcceptWaveform(data):
+            chunk = json.loads(rec_in.Result()).get("text", "")
+            if chunk:
+                text_in += " " + chunk
+
+        if rec_us.AcceptWaveform(data):
+            chunk = json.loads(rec_us.Result()).get("text", "")
+            if chunk:
+                text_us += " " + chunk
+
+    text_in += " " + json.loads(rec_in.FinalResult()).get("text", "")
+    text_us += " " + json.loads(rec_us.FinalResult()).get("text", "")
+
+    text_in = text_in.strip()
+    text_us = text_us.strip()
+
+    print(f"[IN model ] {text_in}")
+    print(f"[US model ] {text_us}")
+
+    result = text_in if len(text_in) >= len(text_us) else text_us
+    print(f"[SELECTED ] {result}")
+    return result
+
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
-    print("[INFO] Loading Vosk model...")
-    vosk_model = vosk.Model(VOSK_MODEL_PATH)
-    recognizer = vosk.KaldiRecognizer(vosk_model, RATE)
+    print("[INFO] Loading Vosk models...")
+    vosk_model_in = vosk.Model(VOSK_MODEL_PATH_IN)
+    vosk_model_us = vosk.Model(VOSK_MODEL_PATH_US)
+    recognizer_in = vosk.KaldiRecognizer(vosk_model_in, RATE)
+    recognizer_us = vosk.KaldiRecognizer(vosk_model_us, RATE)
 
     print("[INFO] Loading openWakeWord model...")
     wake_model = WakeModel(inference_framework="onnx")
@@ -167,7 +190,7 @@ def main():
                 print(f"[WAKE] '{best}' detected (score={triggered[best]:.2f})")
                 last_wake_time = now
 
-                command = listen_for_command(recognizer)
+                command = listen_for_command(recognizer_in, recognizer_us)
                 handle_command(command)
 
                 while not audio_q.empty():
@@ -178,6 +201,7 @@ def main():
 
                 wake_model.reset()
                 print("\n[INFO] Listening for wake word again...\n")
+
 
 if __name__ == "__main__":
     try:
