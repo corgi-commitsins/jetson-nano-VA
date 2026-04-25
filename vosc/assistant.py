@@ -6,7 +6,7 @@ from openwakeword.model import Model as WakeModel
 import vosk
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-VOSK_MODEL_PATH  = "/home/kiran/models/vosk-model-small-en-in-0.4"
+VOSK_MODEL_PATH = "/home/kiran/models/vosk-model-small-en-us-0.15"
 RATE             = 16000
 CHANNELS         = 1
 BLOCKSIZE        = 1280
