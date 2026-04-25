@@ -17,7 +17,7 @@ model = vosk.Model(model_path)
 recognizer = vosk.KaldiRecognizer(model, 16000)
 
 with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype='int16',
-                       channels=1, callback=callback):
+                       channels=1, callback=callback, device=11):  # change 2 to your mic index
     print("Speak into the microphone (Ctrl+C to stop)…")
     try:
         while True:
