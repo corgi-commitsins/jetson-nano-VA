@@ -1,5 +1,6 @@
 import sys, queue, json, time, subprocess, os
 import numpy as np
+import math
 import sounddevice as sd
 from openwakeword.model import Model as WakeModel
 import vosk
@@ -77,19 +78,27 @@ def audio_callback(indata, frames, time_info, status):
         print(f"[AUDIO] {status}", file=sys.stderr)
     audio_q.put(bytes(indata))
 
+# beep after wake word to signal listening
+def play_beep(freq=880, duration=0.15, volume=0.3):
+    """Play a short beep to signal Jarvis is listening."""
+    t = np.linspace(0, duration, int(PIPER_RATE * duration), False)
+    tone = (np.sin(2 * np.pi * freq * t) * volume * 32767).astype(np.int16)
+    sd.play(tone.astype(np.float32) / 32767, samplerate=PIPER_RATE)
+    sd.wait()
+
 # ─── Listen for a command after wake word ─────────────────────────────────────
 def listen_for_command(recognizer):
     print("[INFO] Listening for command...")
     recognizer.Reset()
 
-    # Drain only chunks older than 300ms (keep recent audio)
-    drain_until = time.time() - 0.3
-    drained = 0
-    while not audio_q.empty():
-        audio_q.get_nowait()
-        drained += 1
-        if drained > 5:  # max drain 5 chunks (~400ms), then stop
+    # Drain only the wake word audio (fixed small amount)
+    for _ in range(3):
+        try:
+            audio_q.get_nowait()
+        except queue.Empty:
             break
+
+    play_beep()  # signals user: "speak now"
 
     deadline = time.time() + COMMAND_TIMEOUT
     text = ""
