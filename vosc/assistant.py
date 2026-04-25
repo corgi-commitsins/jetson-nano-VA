@@ -7,9 +7,10 @@ import vosk
 VOSK_MODEL_PATH = "/home/kiran/models/vosk-model-small-en-in-0.4"
 RATE            = 16000
 CHANNELS        = 1
-BLOCKSIZE       = 1280          # ~80ms chunks — good balance for wake word
-WAKE_THRESHOLD  = 0.5           # raise to 0.7 if false triggers, lower if misses
-COMMAND_TIMEOUT = 6.0           # seconds to listen after wake word
+BLOCKSIZE       = 1280
+WAKE_THRESHOLD  = 0.5
+COMMAND_TIMEOUT = 6.0
+MIC_DEVICE      = 11            # your USB mic index
 
 # ─── Intent router ────────────────────────────────────────────────────────────
 def handle_command(text):
@@ -49,7 +50,6 @@ def speak(text):
     #     "--model", "/home/kiran/piper/en_US-lessac-medium.onnx",
     #     "--output_raw"
     # ], input=text.encode(), check=True)
-    # For now just print — swap in Piper next step
 
 # ─── Audio queue ──────────────────────────────────────────────────────────────
 audio_q = queue.Queue()
@@ -66,7 +66,7 @@ def listen_for_command(recognizer):
     deadline = time.time() + COMMAND_TIMEOUT
     text = ""
 
-    # Drain any buffered audio from wake word detection
+    # Drain buffered audio from wake word detection
     while not audio_q.empty():
         audio_q.get_nowait()
 
@@ -88,14 +88,14 @@ def listen_for_command(recognizer):
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     print("[INFO] Loading Vosk model...")
-    vosk_model  = vosk.Model(VOSK_MODEL_PATH)
-    recognizer  = vosk.KaldiRecognizer(vosk_model, RATE)
+    vosk_model = vosk.Model(VOSK_MODEL_PATH)
+    recognizer = vosk.KaldiRecognizer(vosk_model, RATE)
 
     print("[INFO] Loading openWakeWord model...")
-    wake_model  = WakeModel(inference_framework="onnx")
-    wake_names  = list(wake_model.models.keys())
+    wake_model = WakeModel(inference_framework="onnx")
+    wake_names = list(wake_model.models.keys())
     print(f"[INFO] Available wake words: {wake_names}")
-    print(f"[INFO] Listening for any of: {wake_names}")
+    print(f"[INFO] Using mic device index: {MIC_DEVICE}")
     print("[INFO] Say a wake word to activate...\n")
 
     with sd.RawInputStream(
@@ -103,7 +103,8 @@ def main():
         blocksize=BLOCKSIZE,
         dtype="int16",
         channels=CHANNELS,
-        callback=audio_callback
+        callback=audio_callback,
+        device=MIC_DEVICE
     ):
         while True:
             try:
