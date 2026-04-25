@@ -5,13 +5,40 @@ from openwakeword.model import Model as WakeModel
 import vosk
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-VOSK_MODEL_PATH = "/home/kiran/models/vosk-model-small-en-in-0.4"
-RATE            = 16000
-CHANNELS        = 1
-BLOCKSIZE       = 1280
-WAKE_THRESHOLD  = 0.5
-COMMAND_TIMEOUT = 6.0
-MIC_DEVICE      = 11            # your USB mic index
+VOSK_MODEL_PATH  = "/home/kiran/models/vosk-model-small-en-in-0.4"
+RATE             = 16000
+CHANNELS         = 1
+BLOCKSIZE        = 1280
+WAKE_THRESHOLD   = 0.5
+COMMAND_TIMEOUT  = 6.0
+MIC_DEVICE       = 11
+
+PIPER_BIN        = "/home/kiran/VA/jetson-nano-VA/piper-src/piper"
+PIPER_MODEL      = "/home/kiran/VA/jetson-nano-VA/piper/en_US-lessac-medium.onnx"
+PIPER_LIBS       = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/lib"
+PIPER_ESPEAK     = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/share/espeak-ng-data"
+PIPER_RATE       = 22050
+
+# ─── TTS ──────────────────────────────────────────────────────────────────────
+def speak(text):
+    print(f"[SPEAK] {text}")
+    try:
+        env = os.environ.copy()
+        env["LD_LIBRARY_PATH"] = PIPER_LIBS
+        env["ESPEAK_DATA_PATH"] = PIPER_ESPEAK
+        proc = subprocess.Popen(
+            [PIPER_BIN, "--model", PIPER_MODEL, "--output_raw"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=env
+        )
+        raw_audio, _ = proc.communicate(input=text.encode())
+        audio_np = np.frombuffer(raw_audio, dtype=np.int16).astype(np.float32) / 32768.0
+        sd.play(audio_np, samplerate=PIPER_RATE)
+        sd.wait()
+    except Exception as e:
+        print(f"[TTS ERROR] {e}")
 
 # ─── Intent router ────────────────────────────────────────────────────────────
 def handle_command(text):
@@ -42,16 +69,6 @@ def handle_command(text):
     else:
         speak(f"You said: {text}. I don't know how to handle that yet.")
 
-# ─── TTS (placeholder until Piper is installed) ───────────────────────────────
-def speak(text):
-    print(f"[SPEAK] {text}")
-    # Uncomment after Piper is installed:
-    # subprocess.run([
-    #     "/home/kiran/piper/piper",
-    #     "--model", "/home/kiran/piper/en_US-lessac-medium.onnx",
-    #     "--output_raw"
-    # ], input=text.encode(), check=True)
-
 # ─── Audio queue ──────────────────────────────────────────────────────────────
 audio_q = queue.Queue()
 
@@ -67,7 +84,6 @@ def listen_for_command(recognizer):
     deadline = time.time() + COMMAND_TIMEOUT
     text = ""
 
-    # Drain buffered audio from wake word detection
     while not audio_q.empty():
         audio_q.get_nowait()
 
@@ -109,28 +125,22 @@ def main():
     ):
         last_wake_time = 0
         COOLDOWN = 3.0
-        MAX_QUEUE_SIZE = 10  # max chunks to keep, drain the rest
+        MAX_QUEUE_SIZE = 10
 
         while True:
-            # Drain excess queue during inactivity to prevent stale audio buildup
             qsize = audio_q.qsize()
             if qsize > MAX_QUEUE_SIZE:
-                drained = 0
                 while audio_q.qsize() > MAX_QUEUE_SIZE:
                     try:
                         audio_q.get_nowait()
-                        drained += 1
                     except queue.Empty:
                         break
-                # Uncomment below to see drain activity:
-                # print(f"[INFO] Drained {drained} stale chunks (queue was {qsize})")
 
             try:
                 data = audio_q.get(timeout=1.0)
             except queue.Empty:
                 continue
 
-            # Wake word detection
             audio_np = np.frombuffer(data, dtype=np.int16)
             scores = wake_model.predict(audio_np)
             triggered = {k: v for k, v in scores.items() if v > WAKE_THRESHOLD}
@@ -144,7 +154,6 @@ def main():
                 command = listen_for_command(recognizer)
                 handle_command(command)
 
-                # Hard drain after command
                 while not audio_q.empty():
                     try:
                         audio_q.get_nowait()
