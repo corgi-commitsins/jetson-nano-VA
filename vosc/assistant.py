@@ -1,6 +1,5 @@
 import sys, queue, json, time, subprocess, os
 import numpy as np
-import math
 import sounddevice as sd
 from openwakeword.model import Model as WakeModel
 import vosk
@@ -21,6 +20,10 @@ PIPER_LIBS         = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/lib"
 PIPER_ESPEAK       = "/home/kiran/VA/jetson-nano-VA/piper-src/pi/share/espeak-ng-data"
 PIPER_RATE         = 22050
 
+INTENT_WORDS = [
+    "time", "clock", "date", "today", "what", "is", "the",
+    "hello", "hi", "hey", "stop", "exit", "quit", "shutdown"
+]
 
 # ─── TTS ──────────────────────────────────────────────────────────────────────
 def speak(text):
@@ -43,7 +46,6 @@ def speak(text):
     except Exception as e:
         print(f"[TTS ERROR] {e}")
 
-
 # ─── Beep ─────────────────────────────────────────────────────────────────────
 def play_beep(freq=880, duration=0.15, volume=0.3):
     t = np.linspace(0, duration, int(PIPER_RATE * duration), False)
@@ -51,6 +53,36 @@ def play_beep(freq=880, duration=0.15, volume=0.3):
     sd.play(tone.astype(np.float32) / 32767, samplerate=PIPER_RATE)
     sd.wait()
 
+# ─── Intent-aware scorer ──────────────────────────────────────────────────────
+def score_transcript(text):
+    if not text:
+        return 0
+
+    words = text.lower().split()
+    if not words:
+        return 0
+
+    score = 0
+
+    # Bonus for matching known intent words
+    score += sum(3 for w in words if w in INTENT_WORDS)
+
+    # Bonus for valid words
+    score += sum(1 for w in words if len(w) > 1)
+
+    # Penalty for suspicious short garbage tokens
+    score -= sum(2 for w in words if len(w) == 1)
+
+    # # Extra phrase bonuses
+    # joined = " ".join(words)
+    # if "what time" in joined:
+    #     score += 4
+    # if "the time" in joined:
+    #     score += 4
+    # if "what date" in joined or "today date" in joined:
+    #     score += 4
+
+    return score
 
 # ─── Intent router ────────────────────────────────────────────────────────────
 def handle_command(text):
@@ -81,7 +113,6 @@ def handle_command(text):
     else:
         speak(f"You said: {text}. I don't know how to handle that yet.")
 
-
 # ─── Audio queue ──────────────────────────────────────────────────────────────
 audio_q = queue.Queue()
 
@@ -90,13 +121,13 @@ def audio_callback(indata, frames, time_info, status):
         print(f"[AUDIO] {status}", file=sys.stderr)
     audio_q.put(bytes(indata))
 
-
-# ─── Listen for command with 2 Vosk models ───────────────────────────────────
+# ─── Listen for command (dual model + scoring) ────────────────────────────────
 def listen_for_command(rec_in, rec_us):
     print("[INFO] Listening for command...")
     rec_in.Reset()
     rec_us.Reset()
 
+    # Drain a little wake-word tail audio
     for _ in range(3):
         try:
             audio_q.get_nowait()
@@ -131,13 +162,21 @@ def listen_for_command(rec_in, rec_us):
     text_in = text_in.strip()
     text_us = text_us.strip()
 
-    print(f"[IN model ] {text_in}")
-    print(f"[US model ] {text_us}")
+    score_in = score_transcript(text_in)
+    score_us = score_transcript(text_us)
 
-    result = text_in if len(text_in) >= len(text_us) else text_us
+    print(f"[IN model ] {text_in!r:45s}  score={score_in}")
+    print(f"[US model ] {text_us!r:45s}  score={score_us}")
+
+    if score_in == 0 and score_us == 0:
+        result = ""
+    elif score_in >= score_us:
+        result = text_in
+    else:
+        result = text_us
+
     print(f"[SELECTED ] {result}")
     return result
-
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
@@ -201,7 +240,6 @@ def main():
 
                 wake_model.reset()
                 print("\n[INFO] Listening for wake word again...\n")
-
 
 if __name__ == "__main__":
     try:
