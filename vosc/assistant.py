@@ -10,7 +10,7 @@ RATE             = 16000
 CHANNELS         = 1
 BLOCKSIZE        = 1280
 WAKE_THRESHOLD   = 0.5
-COMMAND_TIMEOUT  = 6.0
+COMMAND_TIMEOUT  = 8.0
 MIC_DEVICE       = 11
 
 PIPER_BIN        = "/home/kiran/VA/jetson-nano-VA/piper-src/piper"
@@ -84,6 +84,7 @@ def listen_for_command(recognizer):
     deadline = time.time() + COMMAND_TIMEOUT
     text = ""
 
+    # Drain stale audio from wake word detection
     while not audio_q.empty():
         audio_q.get_nowait()
 
@@ -97,9 +98,14 @@ def listen_for_command(recognizer):
             chunk = result.get("text", "")
             if chunk:
                 text += " " + chunk
+                print(f"[PARTIAL RESULT] {chunk}")  # optional debug
 
+    # Grab anything left in the buffer
     final = json.loads(recognizer.FinalResult())
-    text += " " + final.get("text", "")
+    chunk = final.get("text", "")
+    if chunk:
+        text += " " + chunk
+
     return text.strip()
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
