@@ -81,12 +81,18 @@ def audio_callback(indata, frames, time_info, status):
 def listen_for_command(recognizer):
     print("[INFO] Listening for command...")
     recognizer.Reset()
-    deadline = time.time() + COMMAND_TIMEOUT
-    text = ""
 
-    # Drain stale audio from wake word detection
+    # Drain only chunks older than 300ms (keep recent audio)
+    drain_until = time.time() - 0.3
+    drained = 0
     while not audio_q.empty():
         audio_q.get_nowait()
+        drained += 1
+        if drained > 5:  # max drain 5 chunks (~400ms), then stop
+            break
+
+    deadline = time.time() + COMMAND_TIMEOUT
+    text = ""
 
     while time.time() < deadline:
         try:
@@ -98,14 +104,9 @@ def listen_for_command(recognizer):
             chunk = result.get("text", "")
             if chunk:
                 text += " " + chunk
-                print(f"[PARTIAL RESULT] {chunk}")  # optional debug
 
-    # Grab anything left in the buffer
     final = json.loads(recognizer.FinalResult())
-    chunk = final.get("text", "")
-    if chunk:
-        text += " " + chunk
-
+    text += " " + final.get("text", "")
     return text.strip()
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
